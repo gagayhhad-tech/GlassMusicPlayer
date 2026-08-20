@@ -51,12 +51,14 @@ dotnet publish GlassMusicPlayer.csproj -c Release -r win-x64 --self-contained tr
 
 The output goes to the `release/` folder - zip it and attach to a GitHub Release.
 
-## Discord Rich Presence setup
+## Discord Rich Presence
 
-1. Create an application at https://discord.com/developers/applications -> **New Application**.
-2. Copy its **Application ID** and replace the `ApplicationId` constant in `Services/DiscordPresenceService.cs`.
-3. (Optional) Upload a `glass_logo` image in the **Art Assets** tab of the application so the presence shows a logo.
-4. Turn on **Discord Rich Presence** in the app's Settings -> Audio, and make sure **Activity Privacy** ("Display currently running game as a status message") is enabled in Discord.
+To show the currently playing track in your Discord profile:
+
+1. Turn on **Discord Rich Presence** in the app's **Settings -> Audio**.
+2. Make sure **Activity Privacy** ("Display currently running game as a status message") is enabled in Discord.
+
+The presence shows the track title, artist and playback timer. (The application ID is built into the player.)
 
 ## User data
 
