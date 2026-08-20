@@ -68,6 +68,15 @@ public class IpcBridge
             // Handle window control messages directly (no need to go through audio engine)
             switch (msg.Type)
             {
+                case "dragWindow":
+                    if (_mainWindow != null && msg.Payload.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    {
+                        double dx = 0, dy = 0;
+                        if (msg.Payload.TryGetProperty("dx", out var dxEl) && dxEl.ValueKind == System.Text.Json.JsonValueKind.Number) dx = dxEl.GetDouble();
+                        if (msg.Payload.TryGetProperty("dy", out var dyEl) && dyEl.ValueKind == System.Text.Json.JsonValueKind.Number) dy = dyEl.GetDouble();
+                        _mainWindow.DragWindow(dx, dy);
+                    }
+                    return;
                 case "minimizeWindow":
                     _mainWindow?.MinimizeWindow();
                     return;

@@ -39,6 +39,7 @@ public class AudioEngineService : IDisposable
     private readonly object _analysisLock = new();
     private bool _analysisRunning;
     private bool _replayGain;
+    private bool _discordRpc;
     private bool _flowActive;
     private HashSet<string> _flowUsed = new(StringComparer.OrdinalIgnoreCase);
     private TrackInfo? _flowBase;
@@ -93,7 +94,7 @@ public class AudioEngineService : IDisposable
 
     private static readonly HttpClient _http = new();
 
-    private static void Log(string tag, string message)
+    public static void Log(string tag, string message)
     {
         try
         {
@@ -425,6 +426,7 @@ public class AudioEngineService : IDisposable
                 "setVizMode" => SetVizMode(msg.Payload),
                 "setVisualizer" => SetVisualizer(msg.Payload),
                 "setReplayGain" => SetReplayGain(msg.Payload),
+                "setDiscordRpc" => SetDiscordRpc(msg.Payload),
                 "startFlow" => StartFlow(msg.Payload),
                 "stopFlow" => StopFlow(),
                 "openFolderDialog" => await OpenFolderDialog(),
@@ -1625,6 +1627,7 @@ public class AudioEngineService : IDisposable
         public double LastPosition { get; set; }
         public bool ReplayGain { get; set; }
         public bool VisualizerOn { get; set; } = true;
+        public bool DiscordRpc { get; set; }
     }
 
     private sealed class CachedAnalysis
@@ -1656,6 +1659,7 @@ public class AudioEngineService : IDisposable
             _lastPosition = Math.Max(0, dto.LastPosition);
             _replayGain = dto.ReplayGain;
             _vizMode = dto.VisualizerOn ? 1 : 0;
+            _discordRpc = dto.DiscordRpc;
             _libraryDirectories.Clear();
             if (dto.LibraryDirectories != null)
                 foreach (var d in dto.LibraryDirectories)
@@ -1693,7 +1697,8 @@ public class AudioEngineService : IDisposable
                 LastTrackPath = _lastTrackPath,
                 LastPosition = _lastPosition,
                 ReplayGain = _replayGain,
-                VisualizerOn = _vizMode != 0
+                VisualizerOn = _vizMode != 0,
+                DiscordRpc = _discordRpc
             };
             System.IO.File.WriteAllText(SettingsFilePath, JsonSerializer.Serialize(dto));
         }
@@ -1855,6 +1860,19 @@ public class AudioEngineService : IDisposable
         return JsonSerializer.Serialize(new { success = true });
     }
 
+    public event Action<bool>? OnDiscordRpcChanged;
+
+    public bool DiscordRpcEnabled => _discordRpc;
+
+    private string SetDiscordRpc(JsonElement payload)
+    {
+        bool on = payload.ValueKind == JsonValueKind.True || payload.GetBoolean();
+        _discordRpc = on;
+        SaveSettings();
+        OnDiscordRpcChanged?.Invoke(on);
+        return JsonSerializer.Serialize(new { success = true, discordRpc = on });
+    }
+
     private string StartFlow(JsonElement payload)
     {
         string path = GetStringPayload(payload);
@@ -1995,7 +2013,8 @@ public class AudioEngineService : IDisposable
             crossfade = _crossfadeDuration,
             replayGain = _replayGain,
             flowActive = _flowActive,
-            visualizerOn = _vizMode != 0
+            visualizerOn = _vizMode != 0,
+            discordRpc = _discordRpc
         });
     }
 

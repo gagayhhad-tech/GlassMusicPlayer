@@ -1,154 +1,106 @@
 using System;
 using System.Drawing;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace GlassMusicPlayer.Services;
 
 /// <summary>
-/// System tray icon with a context menu for controlling the player.
+/// System tray icon. Runs on its own STA thread with a dedicated WinForms
+/// message loop so the icon reliably receives clicks inside a WPF host.
+/// The actual context menu is a WPF glass-styled popup (TrayMenuWindow)
+/// shown by MainWindow when RightClicked fires.
 /// </summary>
 public sealed class TrayIconService : IDisposable
 {
-    private readonly NotifyIcon _notifyIcon;
+    private Thread? _thread;
+    private NotifyIcon? _notifyIcon;
+    private Control? _marshal;
+    private volatile bool _disposed;
 
     public event Action? OpenWindow;
-    public event Action? PlayPause;
-    public event Action? Next;
-    public event Action? Prev;
-    public event Action? Exit;
+    public event Action? RightClicked;
 
     public TrayIconService()
     {
-        var menu = new ContextMenuStrip();
-        menu.ShowImageMargin = false;
-        menu.ShowCheckMargin = false;
-        menu.Renderer = new DarkMenuRenderer();
-        menu.BackColor = DarkColor.Bg;
-        menu.ForeColor = DarkColor.Text;
-        menu.Font = new Font("Segoe UI", 9.5f);
-        menu.Padding = new Padding(6, 4, 6, 4);
-
-        AddHeader(menu);
-        AddItem(menu, "Открыть плеер", OpenWindow);
-        menu.Items.Add(NewSeparator());
-        AddItem(menu, "Воспроизведение / Пауза", PlayPause);
-        AddItem(menu, "Следующий трек", Next);
-        AddItem(menu, "Предыдущий трек", Prev);
-        menu.Items.Add(NewSeparator());
-        AddItem(menu, "Выход", Exit);
-
-        _notifyIcon = new NotifyIcon
+        _thread = new Thread(RunTrayThread)
         {
-            Icon = IconProvider.LoadTrayIcon(),
-            Text = "Glass Music Player",
-            Visible = true,
-            ContextMenuStrip = menu
+            IsBackground = true,
+            Name = "GlassTrayThread"
         };
-        _notifyIcon.DoubleClick += (_, _) => OpenWindow?.Invoke();
+        _thread.SetApartmentState(ApartmentState.STA);
+        _thread.Start();
     }
 
-    private static void AddHeader(ContextMenuStrip menu)
+    private void RunTrayThread()
     {
-        var header = new ToolStripLabel("GLASS MUSIC PLAYER")
+        try
         {
-            Padding = new Padding(12, 8, 12, 6),
-            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-            ForeColor = Color.FromArgb(156, 138, 255),
-            IsLink = false
-        };
-        menu.Items.Add(header);
-        menu.Items.Add(NewSeparator());
-    }
+            // Tiny hidden control owning a handle on this thread, used later to
+            // marshal SetTrackTitle/ShowBalloon/Dispose calls back onto it.
+            _marshal = new Control { Visible = false };
+            _marshal.CreateControl();
 
-    private static ToolStripMenuItem AddItem(ContextMenuStrip menu, string text, Action? action)
-    {
-        var item = new ToolStripMenuItem(text)
-        {
-            AutoSize = true,
-            Padding = new Padding(12, 6, 12, 6),
-            ForeColor = DarkColor.Text,
-            BackColor = Color.Transparent
-        };
-        item.Click += (_, _) => action?.Invoke();
-        menu.Items.Add(item);
-        return item;
-    }
+            _notifyIcon = new NotifyIcon
+            {
+                Icon = IconProvider.LoadTrayIcon(),
+                Text = "Glass Music Player",
+                Visible = true
+            };
+            _notifyIcon.DoubleClick += (_, _) => OpenWindow?.Invoke();
+            _notifyIcon.MouseUp += (_, e) =>
+            {
+                if (e.Button == MouseButtons.Right) RightClicked?.Invoke();
+            };
 
-    private static ToolStripSeparator NewSeparator()
-    {
-        var sep = new ToolStripSeparator
+            // Blocks until Application.ExitThread() is called from Dispose().
+            Application.Run();
+        }
+        catch
         {
-            AutoSize = true,
-            Margin = new Padding(6, 2, 6, 2)
-        };
-        return sep;
+        }
+        finally
+        {
+            try { _notifyIcon?.Dispose(); } catch { }
+            _notifyIcon = null;
+        }
     }
 
     public void SetTrackTitle(string title)
     {
-        if (!string.IsNullOrWhiteSpace(title))
-            _notifyIcon.Text = title.Length > 60 ? title[..60] : title;
+        Post(() =>
+        {
+            if (_notifyIcon != null && !string.IsNullOrWhiteSpace(title))
+                _notifyIcon.Text = title.Length > 60 ? title[..60] : title;
+        });
     }
 
     public void ShowBalloon(string title, string text)
     {
-        _notifyIcon.ShowBalloonTip(2000, title, text, ToolTipIcon.Info);
+        Post(() => _notifyIcon?.ShowBalloonTip(2000, title, text, ToolTipIcon.Info));
+    }
+
+    private void Post(Action action)
+    {
+        var c = _marshal;
+        if (c == null || _disposed) return;
+        try { c.BeginInvoke(action); } catch { }
     }
 
     public void Dispose()
     {
-        _notifyIcon.Visible = false;
-        _notifyIcon.Dispose();
-    }
-
-    private static class DarkColor
-    {
-        public static readonly Color Bg = Color.FromArgb(28, 28, 34);
-        public static readonly Color Border = Color.FromArgb(70, 255, 255, 255);
-        public static readonly Color Text = Color.FromArgb(235, 235, 240);
-        public static readonly Color Hover = Color.FromArgb(124, 92, 252);
-        public static readonly Color HoverPressed = Color.FromArgb(96, 68, 205);
-        public static readonly Color Separator = Color.FromArgb(60, 255, 255, 255);
-    }
-
-    private sealed class DarkColorTable : ProfessionalColorTable
-    {
-        public override Color ToolStripDropDownBackground => DarkColor.Bg;
-        public override Color ImageMarginGradientBegin => DarkColor.Bg;
-        public override Color ImageMarginGradientMiddle => DarkColor.Bg;
-        public override Color ImageMarginGradientEnd => DarkColor.Bg;
-        public override Color MenuBorder => DarkColor.Border;
-        public override Color MenuItemBorder => Color.Transparent;
-        public override Color MenuItemSelected => DarkColor.Hover;
-        public override Color MenuItemSelectedGradientBegin => DarkColor.Hover;
-        public override Color MenuItemSelectedGradientEnd => DarkColor.Hover;
-        public override Color MenuItemPressedGradientBegin => DarkColor.HoverPressed;
-        public override Color MenuItemPressedGradientEnd => DarkColor.HoverPressed;
-        public override Color SeparatorDark => DarkColor.Separator;
-        public override Color SeparatorLight => DarkColor.Separator;
-        public override Color ToolStripBorder => DarkColor.Border;
-    }
-
-    private sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
-    {
-        public DarkMenuRenderer() : base(new DarkColorTable())
+        if (_disposed) return;
+        _disposed = true;
+        Post(() =>
         {
-            RoundedEdges = false;
-        }
-
-        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+            try { if (_notifyIcon != null) _notifyIcon.Visible = false; } catch { }
+            try { Application.ExitThread(); } catch { }
+        });
+        if (_thread != null && _thread.IsAlive)
         {
-            var rc = new Rectangle(Point.Empty, e.Item.Size);
-            if (!e.Item.Selected && !e.Item.Pressed) return;
-            using var brush = new SolidBrush(e.Item.Pressed ? DarkColor.HoverPressed : DarkColor.Hover);
-            e.Graphics.FillRectangle(brush, rc);
+            try { _thread.Join(1500); } catch { }
         }
-
-        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
-        {
-            var y = e.Item.Height / 2;
-            using var pen = new Pen(DarkColor.Separator, 1);
-            e.Graphics.DrawLine(pen, 12, y, e.Item.Width - 12, y);
-        }
+        try { _marshal?.Dispose(); } catch { }
+        _notifyIcon = null;
     }
 }

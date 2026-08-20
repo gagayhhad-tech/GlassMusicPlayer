@@ -17,7 +17,9 @@ public partial class MainWindow : Window
     private readonly IpcBridge _bridge;
     private GlobalHotkeys? _hotkeys;
     private TrayIconService? _tray;
+    private TrayMenuWindow? _trayMenu;
     private TaskbarService? _taskbar;
+    private DiscordPresenceService? _discord;
     private bool _allowExit;
     private bool _autoScanned;
 
@@ -28,7 +30,12 @@ public partial class MainWindow : Window
 
         StateChanged += (_, _) => OnWindowStateChanged();
         SizeChanged += (_, _) => { UpdateWindowClip(RootBorder.CornerRadius.TopLeft); ApplyWindowRegion(); };
-        SourceInitialized += (_, _) => ApplyWindowRegion();
+        SourceInitialized += (_, _) =>
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            System.Windows.Interop.HwndSource.FromHwnd(hwnd)?.AddHook(WndProc);
+            ApplyWindowRegion();
+        };
 
         _audioEngine = new AudioEngineService();
             _bridge = new IpcBridge(_audioEngine, System.Windows.Threading.Dispatcher.CurrentDispatcher);
@@ -49,6 +56,7 @@ public partial class MainWindow : Window
             _hotkeys?.Dispose();
             _tray?.Dispose();
             _taskbar?.Dispose();
+            _discord?.Dispose();
         };
     }
 
@@ -67,6 +75,7 @@ public partial class MainWindow : Window
         try { InstallHotkeys(); } catch { }
         try { SetupTray(); } catch { }
         try { SetupTaskbar(); } catch { }
+        try { SetupDiscordPresence(); } catch { }
 
         _audioEngine.OnStateChanged += state => Dispatcher.BeginInvoke(() =>
         {
@@ -74,6 +83,7 @@ public partial class MainWindow : Window
             {
                 _taskbar?.SetProgress(state.CurrentTime, state.Duration, state.IsPlaying);
                 _taskbar?.SetThumbnailButtons(state.IsPlaying, state.CurrentTrack != null);
+                _discord?.UpdatePresence(state.CurrentTrack?.Title, state.CurrentTrack?.Artist, state.IsPlaying, state.CurrentTime);
             }
             catch { }
         });
@@ -82,9 +92,21 @@ public partial class MainWindow : Window
             try
             {
                 _tray?.SetTrackTitle($"{track.Artist} - {track.Title}");
+                _trayMenu?.SetTrackTitle($"{track.Artist} - {track.Title}");
+                _discord?.UpdatePresence(track.Title, track.Artist, true, 0);
             }
             catch { }
         });
+    }
+
+    private void SetupDiscordPresence()
+    {
+        _discord = new DiscordPresenceService();
+        _audioEngine.OnDiscordRpcChanged += enabled => Dispatcher.BeginInvoke(() =>
+        {
+            try { _discord?.SetEnabled(enabled); } catch { }
+        });
+        _discord.SetEnabled(_audioEngine.DiscordRpcEnabled);
     }
 
     private void InstallHotkeys()
@@ -109,11 +131,51 @@ public partial class MainWindow : Window
     {
         _tray = new TrayIconService();
         _tray.OpenWindow += () => Dispatcher.Invoke(() => { Show(); WindowState = WindowState.Normal; Activate(); });
-        _tray.PlayPause += () => _ = SendToEngine("playPause");
-        _tray.Next += () => _ = SendToEngine("next");
-        _tray.Prev += () => _ = SendToEngine("previous");
-        _tray.Exit += () => Dispatcher.Invoke(() => { _allowExit = true; Close(); });
+        _tray.RightClicked += () => Dispatcher.BeginInvoke(ShowTrayMenu);
+
+        _trayMenu = new TrayMenuWindow();
+        _trayMenu.OpenWindow += () => Dispatcher.Invoke(() => { Show(); WindowState = WindowState.Normal; Activate(); });
+        _trayMenu.PlayPause += () => { AudioEngineService.Log("TRAY", "play-pause"); Dispatcher.BeginInvoke(() => _ = SendToEngine("playPause")); };
+        _trayMenu.Next += () => { AudioEngineService.Log("TRAY", "next"); Dispatcher.BeginInvoke(() => _ = SendToEngine("next")); };
+        _trayMenu.Prev += () => { AudioEngineService.Log("TRAY", "previous"); Dispatcher.BeginInvoke(() => _ = SendToEngine("previous")); };
+        _trayMenu.Exit += () => { AudioEngineService.Log("TRAY", "exit"); Dispatcher.Invoke(() => { _allowExit = true; Close(); }); };
         _tray.SetTrackTitle("Glass Music Player");
+    }
+
+    private void ShowTrayMenu()
+    {
+        if (_trayMenu == null) return;
+        try
+        {
+            var pos = System.Windows.Forms.Cursor.Position;
+            var wa = System.Windows.Forms.Screen.FromPoint(pos).WorkingArea;
+            var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(_trayMenu);
+            double sx = dpi.DpiScaleX, sy = dpi.DpiScaleY;
+
+            // Measure the auto-sized popup before showing so we can clamp it
+            // inside the screen's working area (above the taskbar).
+            _trayMenu.Measure(new System.Windows.Size(_trayMenu.Width, double.PositiveInfinity));
+            _trayMenu.Arrange(new Rect(0, 0, _trayMenu.Width, _trayMenu.DesiredSize.Height));
+            _trayMenu.UpdateLayout();
+
+            double mw = _trayMenu.ActualWidth * sx;
+            double mh = _trayMenu.ActualHeight * sy;
+
+            double x = pos.X + 4;
+            double y = pos.Y + 4;
+            if (x + mw > wa.Right) x = wa.Right - mw - 4;
+            if (y + mh > wa.Bottom) y = wa.Bottom - mh - 4;
+            if (x < wa.Left) x = wa.Left + 4;
+            if (y < wa.Top) y = wa.Top + 4;
+
+            _trayMenu.Left = x / sx;
+            _trayMenu.Top = y / sy;
+            _trayMenu.Show();
+            _trayMenu.Activate();
+        }
+        catch
+        {
+        }
     }
 
     private void SetupTaskbar()
@@ -124,6 +186,16 @@ public partial class MainWindow : Window
         _taskbar.NextClicked += () => _ = SendToEngine("next");
         _taskbar.PrevClicked += () => _ = SendToEngine("previous");
         _taskbar.SetThumbnailButtons(false, false);
+    }
+
+    public void DragWindow(double dx, double dy)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (WindowState == WindowState.Maximized || WindowState == WindowState.Minimized) return;
+            Left += dx;
+            Top += dy;
+        });
     }
 
     public void MinimizeWindow()
@@ -234,6 +306,41 @@ public partial class MainWindow : Window
     private const int GWL_EXSTYLE = -20;
     private const uint WS_EX_LAYERED = 0x00080000;
     private const uint LWA_ALPHA = 0x00000002;
+    private const int WM_GETMINMAXINFO = 0x0024;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MINMAXINFO
+    {
+        public POINT ptReserved;
+        public POINT ptMaxSize;
+        public POINT ptMaxPosition;
+        public POINT ptMinTrackSize;
+        public POINT ptMaxTrackSize;
+    }
+
+    // Keeps a maximized (transparent, borderless) window inside the work area
+    // so it does not cover the taskbar or overflow the screen edges.
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WM_GETMINMAXINFO && lParam != IntPtr.Zero)
+        {
+            var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
+            var workArea = SystemParameters.WorkArea;
+            var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice;
+            double sx = transform?.M11 ?? 1d;
+            double sy = transform?.M22 ?? 1d;
+            mmi.ptMaxPosition.X = (int)(workArea.Left * sx);
+            mmi.ptMaxPosition.Y = (int)(workArea.Top * sy);
+            mmi.ptMaxSize.X = (int)(workArea.Width * sx);
+            mmi.ptMaxSize.Y = (int)(workArea.Height * sy);
+            Marshal.StructureToPtr(mmi, lParam, true);
+            handled = true;
+        }
+        return IntPtr.Zero;
+    }
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);

@@ -343,13 +343,46 @@ body.sidebar-hidden .sidebar {
 .progress-fill { height: 100%; background: var(--accent); border-radius: 2px; width: 0%; will-change: width; }
 .progress-thumb { display: none; position: absolute; top: 50%; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 4px rgba(107, 114, 128, 0.5); }
 .progress-bar-outer:hover .progress-thumb { display: block; }
+.progress-bar-outer.dragging .progress-thumb { display: block; }
 
 .player-volume-group { display: flex; align-items: center; gap: 8px; width: 180px; flex-shrink: 0; position: relative; }
 .player-right { display: flex; align-items: center; justify-content: flex-end; gap: 20px; width: 280px; flex-shrink: 0; }
-.volume-bar-outer { flex: 1; height: 24px; display: flex; align-items: center; cursor: pointer; }
+.volume-bar-outer { flex: 1; height: 24px; display: flex; align-items: center; cursor: pointer; position: relative; }
 .volume-track { width: 100%; height: 4px; background: rgba(255, 255, 255, 0.08); border-radius: 2px; overflow: hidden; }
-.volume-fill { height: 100%; background: var(--text-secondary); border-radius: 2px; width: 100%; will-change: width; }
-.volume-value { font-size: 11px; color: var(--text-tertiary); min-width: 32px; font-variant-numeric: tabular-nums; }
+.volume-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  border-radius: 2px;
+  transform-origin: left center;
+  transform: scaleX(0);
+  will-change: transform;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), filter 0.3s ease;
+}
+.volume-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.7), 0 0 16px var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, left 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.volume-bar-outer:hover .volume-thumb, .volume-bar-outer.dragging .volume-thumb { opacity: 1; }
+.volume-bar-outer.dragging .volume-fill, .volume-bar-outer.dragging .volume-thumb { transition: none; }
+.volume-value {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  min-width: 32px;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.2s ease;
+}
+.volume-value.pop { color: var(--accent-hover); }
 
 /* ===== FAVORITES ===== */
 .favorites-container { max-width: 1100px; margin: 0 auto; }
@@ -465,15 +498,12 @@ body.sidebar-hidden .sidebar {
   height: 36px;
   padding: 0 2px;
   z-index: 10001;
-  -webkit-app-region: drag;
   gap: 1px;
   background: rgba(18, 18, 24, 0.5);
   backdrop-filter: blur(12px) saturate(1.3);
   -webkit-backdrop-filter: blur(12px) saturate(1.3);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-.title-bar .btn {
-  -webkit-app-region: no-drag;
+  user-select: none;
 }
 .sidebar-toggle-btn { margin-right: auto; }
 .title-btn {
@@ -494,6 +524,9 @@ body.sidebar-hidden .sidebar {
   position: relative;
   overflow: visible;
 }
+.title-btn i { font-size: 13px; line-height: 1; }
+.title-btn.minimize-btn i { font-size: 16px; }
+.title-btn.maximize-btn i { font-size: 12px; }
 .title-btn:hover {
   color: var(--text-primary) !important;
   background: rgba(255, 255, 255, 0.08) !important;
@@ -1356,6 +1389,10 @@ body.fs-open .title-bar { display: none; }
               <span class="settings-label">Visualizer</span>
               <button class="btn btn-icon small" id="btnBgVizSettings" onclick="toggleBgVisualizer()" title="Visualizer"><i class="bi bi-soundwave" id="bgVizSettingsIcon"></i></button>
             </div>
+            <div class="settings-row">
+              <span class="settings-label">Discord Rich Presence</span>
+              <button class="btn btn-icon small" id="btnDiscordRpc" onclick="toggleDiscordRpc()" title="Discord Rich Presence"><i class="bi bi-discord" id="discordRpcIcon"></i></button>
+            </div>
           </div>
           <div class="settings-section">
             <div class="settings-section-title">Sleep Timer</div>
@@ -1460,6 +1497,7 @@ body.fs-open .title-bar { display: none; }
               <div class="volume-track">
                 <div class="volume-fill" id="volumeFill"></div>
               </div>
+              <div class="volume-thumb" id="volumeThumb"></div>
             </div>
             <span class="volume-value" id="volumeValue">100%</span>
           </div>
@@ -1560,17 +1598,17 @@ function handleMessage(msg) {
           state.isPlaying = payload.isPlaying !== undefined ? payload.isPlaying : state.isPlaying;
           state.currentTime = payload.currentTime || 0;
           state.duration = payload.duration || 0;
-          state.volume = payload.volume !== undefined ? payload.volume : state.volume;
+          if (payload.volume !== undefined && !volumeDragging) { state.volume = payload.volume; }
           state.isMuted = payload.isMuted !== undefined ? payload.isMuted : state.isMuted;
           state.shuffle = payload.isShuffled !== undefined ? payload.isShuffled : state.shuffle;
           state.repeat = payload.loopMode !== undefined ? 
             (payload.loopMode === 0 ? 'none' : payload.loopMode === 2 ? 'one' : 'all') : state.repeat;
           if (payload.currentTrack) { state.currentTrack = payload.currentTrack; applyTrackAccent(); }
         }
-        updatePlayerProgress();
+        if (!seeking) updatePlayerProgress();
         updatePlayPauseButton();
         updateShuffleRepeatButtons();
-        updateVolumeDisplay();
+        if (!volumeDragging) updateVolumeDisplay();
         updateTrackListActiveState();
         updateLyricsHighlight();
         break;
@@ -1640,6 +1678,7 @@ function handleMessage(msg) {
           if (payload.replayGain !== undefined) { applyReplayGainSetting(payload.replayGain); }
           if (payload.flowActive !== undefined) { applyFlowSetting(payload.flowActive); }
           if (payload.visualizerOn !== undefined) { applyVisualizerSetting(payload.visualizerOn); }
+          if (payload.discordRpc !== undefined) { applyDiscordRpcSetting(payload.discordRpc); }
           renderEqBands(); updateShuffleRepeatButtons();
         }
         else if (payload && payload.favorites !== undefined) {
@@ -2278,6 +2317,17 @@ function applyReplayGainSetting(on) {
   document.getElementById('replayGainIcon').className = on ? 'bi bi-volume-up-fill' : 'bi bi-volume-mute-fill';
 }
 
+function toggleDiscordRpc() {
+  var on = !document.getElementById('btnDiscordRpc').classList.contains('active');
+  sendMessage('setDiscordRpc', on);
+  applyDiscordRpcSetting(on);
+}
+
+function applyDiscordRpcSetting(on) {
+  document.getElementById('btnDiscordRpc').classList.toggle('active', !!on);
+  document.getElementById('discordRpcIcon').className = on ? 'bi bi-discord-fill' : 'bi bi-discord';
+}
+
 // ===== VISUALIZER TOGGLE =====
 function toggleBgVisualizer() {
   visualizerOn = !visualizerOn;
@@ -2496,7 +2546,9 @@ function queueDrop(ev, index) {
 
 function updateVolumeDisplay() {
   var vol = state.isMuted ? 0 : state.volume;
-  document.getElementById('volumeFill').style.width = (vol * 100) + '%';
+  var pct = (vol * 100);
+  document.getElementById('volumeFill').style.transform = 'scaleX(' + pct / 100 + ')';
+  setVolumeThumbPos(vol);
   document.getElementById('volumeValue').textContent = Math.round(vol * 100) + '%';
   var icon = document.getElementById('volumeIcon');
   if (state.isMuted || state.volume === 0) { icon.className = 'bi bi-volume-mute-fill'; }
@@ -2506,11 +2558,78 @@ function updateVolumeDisplay() {
 }
 
 function clickSeek(e) {
+  seekFromEvent(e, e.currentTarget);
+}
+
+// ===== SEEK DRAG =====
+var seeking = false;
+
+function seekFromEvent(e, bar) {
   if (state.duration <= 0) return;
-  var bar = e.currentTarget;
   var rect = bar.getBoundingClientRect();
   var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  sendMessage('seek', pct * state.duration);
+  var t = pct * state.duration;
+  state.currentTime = t;
+  document.getElementById('progressFill').style.width = (pct * 100) + '%';
+  document.getElementById('progressThumb').style.left = (pct * 100) + '%';
+  document.getElementById('currentTime').textContent = formatTime(t);
+  sendMessage('seek', t);
+}
+
+document.addEventListener('mousedown', function(e) {
+  var bar = e.target.closest('.progress-bar-outer');
+  if (bar) {
+    seeking = true;
+    bar.classList.add('dragging');
+    seekFromEvent(e, bar);
+    e.preventDefault();
+  }
+});
+
+document.addEventListener('mousemove', function(e) {
+  if (seeking) {
+    var bar = document.querySelector('.progress-bar-outer');
+    if (bar) seekFromEvent(e, bar);
+    e.preventDefault();
+  }
+});
+
+document.addEventListener('mouseup', function() {
+  if (seeking) {
+    seeking = false;
+    document.querySelectorAll('.progress-bar-outer').forEach(function(el) {
+      el.classList.remove('dragging');
+    });
+  }
+});
+
+// ===== WINDOW DRAG =====
+// -webkit-app-region does not work reliably on transparent WPF windows,
+// so we move the window manually by sending deltas to the host.
+var winDrag = null;
+var titleBarEl = document.querySelector('.title-bar');
+
+if (titleBarEl) {
+  titleBarEl.addEventListener('pointerdown', function(e) {
+    if (e.target.closest('.title-btn')) return;
+    winDrag = { pointerId: e.pointerId, lastX: e.screenX, lastY: e.screenY };
+    titleBarEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  titleBarEl.addEventListener('pointermove', function(e) {
+    if (!winDrag || winDrag.pointerId !== e.pointerId) return;
+    var dx = e.screenX - winDrag.lastX;
+    var dy = e.screenY - winDrag.lastY;
+    if (dx === 0 && dy === 0) return;
+    winDrag.lastX = e.screenX;
+    winDrag.lastY = e.screenY;
+    sendMessage('dragWindow', { dx: dx, dy: dy });
+  });
+
+  function endWinDrag(e) { if (winDrag && winDrag.pointerId === e.pointerId) { winDrag = null; } }
+  titleBarEl.addEventListener('pointerup', endWinDrag);
+  titleBarEl.addEventListener('pointercancel', endWinDrag);
 }
 
 // ===== VOLUME DRAG =====
@@ -2529,28 +2648,58 @@ function setVolumeFromEvent(e) {
   state.volume = vol;
   sendMessage('setVolume', vol);
   updateVolumeDisplay();
+  var valEl = document.getElementById('volumeValue');
+  valEl.classList.add('pop');
+  clearTimeout(valEl._popT);
+  valEl._popT = setTimeout(function() { valEl.classList.remove('pop'); }, 250);
 }
+
+function setVolumeThumbPos(vol) {
+  var bar = document.querySelector('.volume-bar-outer');
+  var thumb = document.getElementById('volumeThumb');
+  if (!bar || !thumb) return;
+  var rect = bar.getBoundingClientRect();
+  var half = 6;
+  var x = Math.max(half, Math.min(rect.width - half, vol * rect.width));
+  thumb.style.left = x + 'px';
+}
+
+var volumeDown = null;
 
 document.addEventListener('mousedown', function(e) {
   var volumeBar = e.target.closest('.volume-bar-outer');
   if (volumeBar) {
     volumeDragging = true;
-    volumeBar.classList.add('dragging');
-    setVolumeFromEvent(e);
+    volumeDown = { x: e.clientX, moved: false };
     e.preventDefault();
   }
 });
 
 document.addEventListener('mousemove', function(e) {
-  if (volumeDragging) {
+  if (!volumeDragging) return;
+  var volumeBar = document.querySelector('.volume-bar-outer');
+  if (volumeBar && volumeDown) {
+    if (!volumeDown.moved) {
+      if (Math.abs(e.clientX - volumeDown.x) > 3) {
+        volumeDown.moved = true;
+        volumeBar.classList.add('dragging');
+      } else {
+        return;
+      }
+    }
     setVolumeFromEvent(e);
-    e.preventDefault();
   }
+  e.preventDefault();
 });
 
-document.addEventListener('mouseup', function() {
+document.addEventListener('mouseup', function(e) {
   if (volumeDragging) {
+    if (volumeDown && !volumeDown.moved) {
+      // Simple click: glide smoothly to the clicked spot.
+      setVolumeFromEvent(e);
+    }
     volumeDragging = false;
+    volumeDown = null;
     document.querySelectorAll('.volume-bar-outer').forEach(function(el) {
       el.classList.remove('dragging');
     });
@@ -2943,17 +3092,24 @@ function renderEqualizer(data) {
   renderEqBands();
 }
 
+function eqFillStyle(gain) {
+  var p = Math.abs(gain) / 20 * 50;
+  if (gain >= 0) return { height: p + '%', bottom: '50%' };
+  return { height: p + '%', bottom: (50 - p) + '%' };
+}
+
 function renderEqBands() {
   var container = document.getElementById('eqBands');
   container.innerHTML = '';
   for (var i = 0; i < 10; i++) {
     var band = document.createElement('div');
     band.className = 'equalizer-band';
+    var fs = eqFillStyle(eqCurrentGains[i]);
     band.innerHTML = 
       '<div class="equalizer-band-value" id="eqVal' + i + '">' + (eqCurrentGains[i] >= 0 ? '+' : '') + eqCurrentGains[i].toFixed(1) + 'dB</div>' +
       '<div class="equalizer-slider-container" data-band="' + i + '" onmousedown="eqStartDrag(event, ' + i + ')">' +
         '<div class="equalizer-slider-track"></div>' +
-        '<div class="equalizer-slider-fill" id="eqFill' + i + '" style="height:' + Math.abs(eqCurrentGains[i] / 20 * 100) + 'px;bottom:' + (eqCurrentGains[i] >= 0 ? '50%' : (50 - Math.abs(eqCurrentGains[i] / 20 * 50)) + '%') + '"></div>' +
+        '<div class="equalizer-slider-fill" id="eqFill' + i + '" style="height:' + fs.height + ';bottom:' + fs.bottom + '"></div>' +
         '<div class="equalizer-slider-thumb" id="eqThumb' + i + '" style="bottom:' + (50 + eqCurrentGains[i] / 20 * 50) + '%"></div>' +
       '</div>' +
       '<div class="equalizer-band-label">' + EQ_BAND_LABELS[i] + '</div>';
@@ -3018,15 +3174,14 @@ function eqUpdateBandFromEvent(e, band) {
   
   var fill = document.getElementById('eqFill' + band);
   if (fill) {
-    var fillPct = Math.abs(gain) / 20 * 100;
-    fill.style.height = fillPct + 'px';
-    if (gain >= 0) {
-      fill.style.bottom = '50%';
-      fill.style.background = 'linear-gradient(to top, rgba(34, 197, 94, 0.8), rgba(34, 197, 94, 0.4))';
-    } else {
-      fill.style.bottom = (50 - fillPct / 2) + '%';
-      fill.style.background = 'linear-gradient(to top, rgba(239, 68, 68, 0.8), rgba(239, 68, 68, 0.4))';
-    }
+    var fs = eqFillStyle(gain);
+    fill.style.height = fs.height;
+    fill.style.bottom = fs.bottom;
+    fill.style.background = gain > 0
+      ? 'linear-gradient(to top, rgba(34, 197, 94, 0.8), rgba(34, 197, 94, 0.4))'
+      : gain < 0
+        ? 'linear-gradient(to top, rgba(239, 68, 68, 0.8), rgba(239, 68, 68, 0.4))'
+        : 'var(--accent)';
   }
   
   // Update active preset
