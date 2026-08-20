@@ -2325,7 +2325,9 @@ function toggleDiscordRpc() {
 
 function applyDiscordRpcSetting(on) {
   document.getElementById('btnDiscordRpc').classList.toggle('active', !!on);
-  document.getElementById('discordRpcIcon').className = on ? 'bi bi-discord-fill' : 'bi bi-discord';
+  // No 'discord-fill' glyph exists in Bootstrap Icons; the .active class on the
+  // button already conveys the on state via accent color/background.
+  document.getElementById('discordRpcIcon').className = 'bi bi-discord';
 }
 
 // ===== VISUALIZER TOGGLE =====
