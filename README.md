@@ -19,10 +19,6 @@ A glassmorphism-style music player for Windows, built with **WPF (.NET 8)** and 
 - **Theming** — accent color, light/dark glass theme, custom background.
 - **Background visualizer toggle** — can be disabled in Settings.
 
-## Screenshots
-
-_(Add your screenshots here, e.g. `docs/screenshots/main.png`)_
-
 ## Requirements
 
 - **Windows 10 / 11** (64-bit)
@@ -76,4 +72,4 @@ The app keeps its data in `%APPDATA%\GlassMusicPlayer`:
 
 ## License
 
-This project is provided as-is. If you want to add a license (MIT, etc.), create a `LICENSE` file and reference it here.
+Released under the [MIT License](LICENSE).
