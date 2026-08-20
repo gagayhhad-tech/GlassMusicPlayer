@@ -1,0 +1,31 @@
+# Build output
+bin/
+obj/
+release/
+publish/
+publish2/
+publish3/
+publish4/
+publish5/
+publish6/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# User files
+*.rsuser
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Release archives (attach to GitHub Releases instead of committing)
+*.zip
